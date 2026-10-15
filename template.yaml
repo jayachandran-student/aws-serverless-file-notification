@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Serverless File Notification System
+  Triggers an SNS email alert whenever a file is uploaded to an S3 bucket.
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Description: Email address to receive S3 upload notifications
+    Default: jayachandran.k30@gmail.com
+
+  BucketName:
+    Type: String
+    Description: Name of the S3 bucket to monitor
+    Default: serverless-file-notification-bucket
+
+Resources:
+
+  # ─── S3 Bucket ───────────────────────────────────────────────
+  FileUploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: "s3:ObjectCreated:*"
+            Function: !GetAtt FileNotificationFunction.Arn
+
+  # ─── SNS Topic ───────────────────────────────────────────────
+  FileNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: file-upload-notifications
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref NotificationEmail
+
+  # ─── Lambda Function ─────────────────────────────────────────
+  FileNotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: s3-file-notification
+      Runtime: nodejs18.x
+      Handler: index.handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref FileNotificationTopic
+          AWS_REGION: !Ref AWS::Region
+      Code:
+        ZipFile: |
+          export const handler = async (event) => {
+            console.log("Placeholder - deploy actual code via CLI");
+            return { statusCode: 200 };
+          };
+
+  # ─── Lambda Permission (allow S3 to invoke Lambda) ───────────
+  LambdaS3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt FileNotificationFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub "arn:aws:s3:::${BucketName}"
+
+  # ─── IAM Role for Lambda ─────────────────────────────────────
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: lambda-s3-sns-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaSNSPublishPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Allow Lambda to publish to SNS
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref FileNotificationTopic
+              # Allow Lambda to read from S3
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${BucketName}"
+                  - !Sub "arn:aws:s3:::${BucketName}/*"
+              # Allow Lambda to write CloudWatch logs
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+
+Outputs:
+  BucketName:
+    Description: S3 bucket that triggers notifications
+    Value: !Ref FileUploadBucket
+
+  LambdaFunction:
+    Description: Lambda function that processes S3 events
+    Value: !GetAtt FileNotificationFunction.Arn
+
+  SNSTopic:
+    Description: SNS topic that sends email notifications
+    Value: !Ref FileNotificationTopic
+
+  NotificationEmail:
+    Description: Email address receiving notifications
+    Value: !Ref NotificationEmail
